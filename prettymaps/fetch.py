@@ -1,4 +1,4 @@
-'''
+"""
 Prettymaps - A minimal Python library to draw pretty maps from OpenStreetMap Data
 Copyright (C) 2021 Marcelo Prates
 
@@ -14,9 +14,10 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
-'''
+"""
 
 from ast import Dict
+import code
 from functools import reduce
 from tokenize import Number, String
 from typing import Optional, Union, Tuple
@@ -29,6 +30,13 @@ import numpy as np
 from shapely.geometry import Point, Polygon, MultiPolygon, LineString, MultiLineString
 from shapely.ops import unary_union
 from geopandas import GeoDataFrame, read_file
+from rich.console import Console
+
+C = Console()
+
+
+# NOTE: Doubling because of timeouts.
+ox.config(timeout=360)
 
 
 def get_boundary(
@@ -81,7 +89,7 @@ def get_perimeter(query, by_osmid: Boolean = False, **kwargs) -> GeoDataFrame:
         query,
         by_osmid=by_osmid,
         **kwargs,
-        **{x: kwargs[x] for x in ["circle", "dilate"] if x in kwargs.keys()}
+        **{x: kwargs[x] for x in ["circle", "dilate"] if x in kwargs.keys()},
     )
 
 
@@ -165,7 +173,7 @@ def get_geometries(
     circle: Boolean = True,
     dilate: float = 0,
     point_size: float = 1,
-    line_width: float = 1
+    line_width: float = 1,
 ) -> Union[Polygon, MultiPolygon]:
     """Get geometries
 
@@ -182,50 +190,109 @@ def get_geometries(
     Returns:
         [type]: [description]
     """
+    perimeter_orig = perimeter
 
     # Boundary defined by polygon (perimeter)
-    if perimeter is not None:
-        geometries = ox.geometries_from_polygon(
-            unary_union(perimeter.to_crs(3174).buffer(buffer+perimeter_tolerance).to_crs(4326).geometry)
-            if buffer >0 or perimeter_tolerance > 0
-            else unary_union(perimeter.geometry),
+    if perimeter_orig is not None:
+        C.log("Got defined perimeter")
+        geometries_retrieved = ox.geometries_from_polygon(
+            unary_union(
+                perimeter_orig.to_crs(3174)
+                .buffer(buffer + perimeter_tolerance)
+                .to_crs(4326)
+                .geometry
+            )
+            if buffer > 0 or perimeter_tolerance > 0
+            else unary_union(perimeter_orig.geometry),
             tags={tags: True} if type(tags) == str else tags,
         )
-        perimeter = unary_union(ox.project_gdf(perimeter).geometry)
+        perimeter_poly = unary_union(ox.project_gdf(perimeter_orig).geometry)
     # Boundary defined by circle with radius 'radius' around point
     elif (point is not None) and (radius is not None):
-        geometries = ox.geometries_from_point(
+        C.log("Got radius and point")
+        geometries_retrieved = ox.geometries_from_point(
             point,
             dist=radius + dilate + buffer,
             tags={tags: True} if type(tags) == str else tags,
         )
-        perimeter = get_boundary(
-            point, radius, geometries.crs, circle=circle, dilate=dilate
+        perimeter_poly = get_boundary(
+            point, radius, geometries_retrieved.crs, circle=circle, dilate=dilate
         )
 
-    # Project GDF
-    if len(geometries) > 0:
-        geometries = ox.project_gdf(geometries)
+    C.log(f"Geometries before projection: {len(geometries_retrieved)}")
 
+    # exit(0)
+    # code.interact(local=dict(globals(), **locals()))
+
+    # Project GDF
+    if len(geometries_retrieved) > 0:
+        geometries_projected = ox.project_gdf(geometries_retrieved)
+    else:
+        C.log("WARNING: Empty geometries, no projection")
+        geometries_projected = geometries_retrieved
+
+    # code.interact(local=dict(globals(), **locals()))
+
+    C.log(f"Geometries after projection: {len(geometries_projected)}")
+    C.log(
+        f"Non-empty Geometries after projection: {sum(geometries_projected.length > 0)}"
+    )
+
+    # NOTE: Changing lines here
     # Intersect with perimeter
-    geometries = geometries.intersection(perimeter)
+    # original:
+    # geometries = geometries_projected.intersection(perimeter_poly)
+    # doesn't work, but keeping; something else might be going on below.
+    geometries_intersected = geometries_projected.intersection(perimeter_poly).buffer(0)
+    # doesn't work:
+    # geometries_intersected = [geo.intersection(perimeter_poly).buffer(0) for geo in geometries_projected.geometry]
+    # new attempt:
+    # geometries_intersected = [perimeter_poly.intersection(unary_union(geometries_projected.geometry))]
+    # custom (causes tiny map w/ water all plotted way off to right)
+    # geometries_intersected = [x[1].geometry for x in geometries_projected.iterrows()]
+
+    C.log(f"Geometries after intersection: {len(geometries_intersected)}")
+    C.log(
+        f"Non-empty Geometries after intersection: {sum(geometries_intersected.length > 0)}"
+    )
 
     # Get points, lines, polys & multipolys
     points, lines, polys, multipolys = map(
-        lambda t: [x for x in geometries if isinstance(x, t)],
-        [Point, LineString, Polygon, MultiPolygon]
+        lambda t: [x for x in geometries_intersected if isinstance(x, t)],
+        [Point, LineString, Polygon, MultiPolygon],
     )
+    C.log(f"   points:     {len(points)}")
+    C.log(f"   lines:      {len(lines)}")
+    C.log(f"   polys:      {len(polys)}")
+    C.log(f"   multipolys: {len(multipolys)}")
+
     # Convert points, lines & polygons into multipolygons
     points = [x.buffer(point_size) for x in points]
     lines = [x.buffer(line_width) for x in lines]
     # Concatenate multipolys
-    multipolys = reduce(lambda x,y: x+y, [list(x) for x in multipolys]) if len(multipolys) > 0 else []
-    # Group everything
-    geometries = MultiPolygon(points + lines + polys + multipolys)
-    # Compute union if specified
-    if union: geometries = unary_union(geometries);
+    multipolys = (
+        reduce(lambda x, y: x + y, [list(x) for x in multipolys])
+        if len(multipolys) > 0
+        else []
+    )
 
-    return geometries
+    # C.log(f"Geometries: {len(geometries)}")
+    # code.interact(local=dict(globals(), **locals()))
+
+    # Group everything
+    geometries_grouped = MultiPolygon(points + lines + polys + multipolys)
+
+    C.log(f"Geometries after grouping: {len(geometries_grouped.geoms)}")
+
+    # code.interact(local=dict(globals(), **locals()))
+
+    # Compute union if specified
+    if union:
+        geometries_union = unary_union(geometries_grouped)
+        # C.log(f"Geometries after union: {len(geometries_union)}")
+        return geometries_union
+    else:
+        return geometries_grouped
 
 
 def get_streets(
@@ -239,7 +306,7 @@ def get_streets(
     retain_all: Boolean = False,
     circle: Boolean = True,
     dilate: float = 0,
-    truncate_by_edge: Boolean = True 
+    truncate_by_edge: Boolean = True,
 ) -> MultiPolygon:
     """
     Get streets
@@ -287,7 +354,7 @@ def get_streets(
                 dist=radius + dilate + buffer,
                 retain_all=retain_all,
                 custom_filter=custom_filter,
-                truncate_by_edge = truncate_by_edge,
+                truncate_by_edge=truncate_by_edge,
             )
             crs = ox.graph_to_gdfs(streets, nodes=False).crs
             streets = ox.project_graph(streets)
@@ -329,14 +396,16 @@ def get_streets(
         )
     else:
         # Dilate all streets by same amount 'width'
-        streets=  MultiLineString(
+        streets = MultiLineString(
             streets[streets.geometry.type == "LineString"].geometry.tolist()
             + list(
                 reduce(
                     lambda x, y: x + y,
                     [
                         list(lines)
-                        for lines in streets[streets.geometry.type == "MultiLineString"].geometry
+                        for lines in streets[
+                            streets.geometry.type == "MultiLineString"
+                        ].geometry
                     ],
                     [],
                 )
@@ -370,7 +439,7 @@ def get_layer(layer: String, **kwargs) -> Union[Polygon, MultiPolygon]:
                 kwargs["point"],
                 kwargs["radius"],
                 crs,
-                **{x: kwargs[x] for x in ["circle", "dilate"] if x in kwargs.keys()}
+                **{x: kwargs[x] for x in ["circle", "dilate"] if x in kwargs.keys()},
             )
             return perimeter
         else:

@@ -1,4 +1,4 @@
-'''
+"""
 Prettymaps - A minimal Python library to draw pretty maps from OpenStreetMap Data
 Copyright (C) 2021 Marcelo Prates
 
@@ -14,8 +14,9 @@ GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
-'''
+"""
 
+import code
 import re
 from collections.abc import Iterable
 
@@ -28,9 +29,12 @@ from shapely.geometry import box, Polygon, MultiLineString, GeometryCollection
 from shapely.affinity import translate, scale, rotate
 from descartes import PolygonPatch
 from tabulate import tabulate
+from rich.console import Console
+from tqdm import tqdm
 
 from .fetch import get_perimeter, get_layer
 
+C = Console()
 
 # Plot a single shape
 def plot_shape(shape, ax, vsketch=None, **kwargs):
@@ -111,8 +115,8 @@ def transform(layers, x, y, scale_x, scale_y, rotation):
 
 
 def draw_text(ax, text, x, y, **kwargs):
-    if 'bbox' in kwargs:
-        bbox_kwargs = kwargs.pop('bbox')
+    if "bbox" in kwargs:
+        bbox_kwargs = kwargs.pop("bbox")
         text = ax.text(x, y, text, **kwargs)
         text.set_bbox(**bbox_kwargs)
     else:
@@ -149,9 +153,9 @@ def plot(
     rotation=None,
 ):
     """
-    
+
     Draw a map from OpenStreetMap data.
-    
+
     Parameters
     ----------
     query : string
@@ -159,10 +163,10 @@ def plot(
     backup : dict
         (Optional) feed the output from a previous 'plot()' run to save time
     postprocessing: function
-        (Optional) Apply a postprocessing step to the 'layers' dict
+        (Optional) Apply a postprocessing step to the 'output_layers' dict
     radius
         (Optional) If not None, draw the map centered around the address with this radius (in meters)
-    layers: dict
+    input_layers: dict
         Specify the name of each layer and the OpenStreetMap tags to fetch
     drawing_kwargs: dict
         Drawing params for each layer (matplotlib params such as 'fc', 'ec', 'fill', etc.)
@@ -186,33 +190,46 @@ def plot(
         (Optional) Vertical scale factor
     rotation: float
         (Optional) Rotation in angles (0-360)
-    
+
     Returns
     -------
-    layers: dict
+    output_layers: dict
         Dictionary of layers (each layer is a Shapely MultiPolygon)
-    
+
     Notes
     -----
-    
+
     """
+    input_layers = layers  # keeping arg name for compatibility
 
     # Interpret query
     query_mode = parse_query(query)
 
     # Save maximum dilation for later use
-    dilations = [kwargs["dilate"] for kwargs in layers.values() if "dilate" in kwargs]
+    dilations = [
+        kwargs["dilate"] for kwargs in input_layers.values() if "dilate" in kwargs
+    ]
     max_dilation = max(dilations) if len(dilations) > 0 else 0
 
     ####################
     ### Fetch Layers ###
     ####################
 
+    C.log("Fetching layers")
+
     # Use backup if provided
+    output_layers = {}
     if backup is not None:
-        layers = backup
-    # Otherwise, fetch layers
-    else:
+        output_layers = backup
+
+    new_output_layers = {}
+    for layer, kwargs in tqdm(input_layers.items()):
+        if layer in output_layers:
+            continue
+
+        C.log(f"- fetching layer '{layer}'")
+
+        # Fetch any missing layers to check if any missing.
         # Define base kwargs
         if radius:
             base_kwargs = {
@@ -226,24 +243,34 @@ def plot(
                 else get_perimeter(query, by_osmid=query_mode == "osmid")
             }
 
-        # Fetch layers
-        layers = {
-            layer: get_layer(
-                layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {})
-            )
-            for layer, kwargs in layers.items()
-        }
+        # Fetch layer
+        # code.interact(local=dict(globals(), **locals()))
+        new_output_layers[layer] = get_layer(
+            layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {})
+        )
+        # code.interact(local=dict(globals(), **locals()))
 
-        # Apply transformation to layers (translate & scale)
-        layers = transform(layers, x, y, scale_x, scale_y, rotation)
+    # We apply transformation and postprocessing to anything new we fetched before
+    # merging with what we had before (if anything).
+
+    # Apply transformation to layers (translate & scale)
+    if len(new_output_layers) > 0:
+        new_output_layers = transform(
+            new_output_layers, x, y, scale_x, scale_y, rotation
+        )
 
         # Apply postprocessing step to layers
         if postprocessing is not None:
-            layers = postprocessing(layers)
+            new_output_layers = postprocessing(new_output_layers)
+
+    output_layers = {**output_layers, **new_output_layers}
 
     ############
     ### Plot ###
     ############
+
+    C.log("Plotting")
+    # return output_layers  # TODO: remove
 
     # Matplot-specific stuff (only run if vsketch mode isn't activated)
     if vsketch is None:
@@ -254,7 +281,7 @@ def plot(
 
     # Plot background
     if "background" in drawing_kwargs:
-        geom = scale(box(*layers["perimeter"].bounds), 1.2, 1.2)
+        geom = scale(box(*output_layers["perimeter"].bounds), 1.2, 1.2)
 
         if vsketch is None:
             ax.add_patch(PolygonPatch(geom, **drawing_kwargs["background"]))
@@ -262,14 +289,17 @@ def plot(
             vsketch.geometry(geom)
 
     # Adjust bounds
-    xmin, ymin, xmax, ymax = layers["perimeter"].buffer(max_dilation).bounds
+    xmin, ymin, xmax, ymax = output_layers["perimeter"].buffer(max_dilation).bounds
     dx, dy = xmax - xmin, ymax - ymin
     if vsketch is None:
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(ymin, ymax)
 
     # Draw layers
-    for layer, shapes in layers.items():
+
+    # code.interact(local=dict(globals(), **locals()))
+
+    for layer, shapes in output_layers.items():
         kwargs = drawing_kwargs[layer] if layer in drawing_kwargs else {}
         if "hatch_c" in kwargs:
             # Draw hatched shape
@@ -299,7 +329,7 @@ def plot(
 
     if ((isinstance(osm_credit, dict)) or (osm_credit is True)) and (vsketch is None):
         x, y = figsize
-        d = 0.8 * (x ** 2 + y ** 2) ** 0.5
+        d = 0.8 * (x**2 + y**2) ** 0.5
         draw_text(
             ax,
             (
@@ -316,7 +346,9 @@ def plot(
             ),
             fontsize=(osm_credit["fontsize"] * d if "fontsize" in osm_credit else d),
             zorder=(
-                osm_credit["zorder"] if "zorder" in osm_credit else len(layers) + 1
+                osm_credit["zorder"]
+                if "zorder" in osm_credit
+                else len(output_layers) + 1
             ),
             **{
                 k: v
@@ -326,4 +358,4 @@ def plot(
         )
 
     # Return perimeter
-    return layers
+    return output_layers
