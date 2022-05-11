@@ -4,6 +4,7 @@ shutup.please()
 
 import argparse
 import code
+import glob
 import os
 from imgcat import imgcat
 from prettymaps import plot
@@ -13,14 +14,13 @@ import pickle
 from rich.console import Console
 
 
-def get_output_path(dir: str, slug: str) -> str:
+def get_output_path(dir: str, slug: str, boundary_type: str) -> str:
     n = 1
     while True:
-        path = os.path.join(dir, f"{slug}-{n}.png")
-        if not os.path.exists(path):
+        if len(glob.glob(os.path.join(dir, f"{slug}-{n}*.png"))) == 0:
             break
         n += 1
-    return path
+    return os.path.join(dir, f"{slug}-{n}-{boundary_type}.png")
 
 
 C = Console()
@@ -52,8 +52,15 @@ parser.add_argument("--place", type=str, required=True, help="Location")
 parser.add_argument(
     "--palette", type=str, required=True, choices=palettes.keys(), help="Color palette"
 )
+parser.add_argument(
+    "--radius",
+    type=int,
+    help="If specified, radius in meters to bound instead of OSM-defined place perimeter.",
+)
+
 args = parser.parse_args()
 
+radius = args.radius
 palette = palettes[args.palette]
 place = args.place
 place_slug = (
@@ -64,8 +71,9 @@ place_slug = (
     .replace("--", "-")
     .replace("--", "-")
 )
-cache_path = "cache/" + place_slug + ".pickle"
-output_path = get_output_path("maps", place_slug)
+boundary_type = f"r{radius}" if radius is not None else "perimeter"
+cache_path = f"cache/{place_slug}-{boundary_type}.pickle"
+output_path = get_output_path("maps", place_slug, boundary_type)
 
 C.log(f"Settings")
 C.log(f"- place:       {place}")
@@ -101,7 +109,7 @@ if backup is not None:
 
 layers = plot(
     place,
-    radius=2000,
+    radius=radius,
     ax=ax,
     backup=backup,
     layers={
