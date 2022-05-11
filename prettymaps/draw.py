@@ -123,6 +123,10 @@ def draw_text(ax, text, x, y, **kwargs):
         text = ax.text(x, y, text, **kwargs)
 
 
+def fetch_layer():
+    pass
+
+
 # Plot
 def plot(
     # Address

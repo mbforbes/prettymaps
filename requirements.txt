@@ -7,3 +7,4 @@ black
 rich
 tqdm
 shutup
+Unidecode

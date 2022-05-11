@@ -9,4 +9,5 @@ See the [original](https://github.com/marceloprates/prettymaps) for all basic re
 - [x] rename vars for mutations
 - [x] cache aware of perimeter or radius
 - [x] output path includes perimeter or radius
+- [x] ASCII-ify paths
 - [ ] parallel fetch

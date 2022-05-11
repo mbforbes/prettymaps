@@ -6,18 +6,24 @@ import argparse
 import code
 import glob
 import os
+import pickle
+
 from imgcat import imgcat
-from prettymaps import plot
 from matplotlib import pyplot as plt
 import matplotlib.font_manager as fm
-import pickle
 from rich.console import Console
+from unidecode import unidecode
+
+from prettymaps import plot
 
 
 def get_output_path(dir: str, slug: str, boundary_type: str) -> str:
     n = 1
     while True:
-        if len(glob.glob(os.path.join(dir, f"{slug}-{n}*.png"))) == 0:
+        g = os.path.join(dir, f"{slug}-{n}*.png")
+        gs = len(glob.glob(g))
+        print(g, gs)
+        if gs == 0:
             break
         n += 1
     return os.path.join(dir, f"{slug}-{n}-{boundary_type}.png")
@@ -63,7 +69,7 @@ args = parser.parse_args()
 radius = args.radius
 palette = palettes[args.palette]
 place = args.place
-place_slug = (
+place_slug = unidecode(
     place.lower()
     .replace(" ", "-")
     .replace(",", "-")
@@ -80,6 +86,8 @@ C.log(f"- place:       {place}")
 C.log(f"- palette:     {palette}")
 C.log(f"- cache_path:  {cache_path}")
 C.log(f"- output_path: {output_path}")
+
+exit(0)
 
 backup = None
 if os.path.exists(cache_path):
