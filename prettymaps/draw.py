@@ -30,6 +30,8 @@ from shapely.affinity import translate, scale, rotate
 from descartes import PolygonPatch
 from tabulate import tabulate
 from rich.console import Console
+
+# from p_tqdm import p_map  # not working
 from tqdm import tqdm
 
 from .fetch import get_perimeter, get_layer
@@ -123,8 +125,60 @@ def draw_text(ax, text, x, y, **kwargs):
         text = ax.text(x, y, text, **kwargs)
 
 
-def fetch_layer():
-    pass
+def fetch_layer(query, query_mode, radius, layer, kwargs):
+    C.log(f"- fetching layer '{layer}'")
+
+    # Define base kwargs
+    if radius:
+        base_kwargs = {
+            "point": query if query_mode == "coordinates" else ox.geocode(query),
+            "radius": radius,
+        }
+    else:
+        base_kwargs = {
+            "perimeter": query
+            if query_mode == "polygon"
+            else get_perimeter(query, by_osmid=query_mode == "osmid")
+        }
+
+    # Fetch layer
+    return get_layer(layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {}))
+
+
+def fetch_parallel(input_layers, output_layers, query, query_mode, radius):
+    """Not really working. May need to switch to different multiproc impl."""
+    # build inputs to parallel fetch
+    # could build this with big comprehension and partials, but whatever
+    queries, query_modes, radii, layer_names, all_kwargs = [], [], [], [], []
+    for layer, kwargs in tqdm(input_layers.items()):
+        if layer in output_layers:
+            continue
+        queries.append(query)
+        query_modes.append(query_mode)
+        radii.append(radius)
+        layer_names.append(layer)
+        all_kwargs.append(kwargs)
+
+    # fetch in parallel
+    layer_results = p_map(
+        fetch_layer, queries, query_modes, radii, layer_names, all_kwargs
+    )
+    # save
+    new_output_layers = {}
+    for i, layer_res in enumerate(layer_results):
+        new_output_layers[layer_names[i]] = layer_res
+
+    return new_output_layers
+
+
+def fetch_sequential(input_layers, output_layers, query, query_mode, radius):
+    new_output_layers = {}
+    for layer, kwargs in tqdm(input_layers.items()):
+        if layer in output_layers:
+            continue
+        new_output_layers[layer] = fetch_layer(query, query_mode, radius, layer, kwargs)
+
+    return new_output_layers
 
 
 # Plot
@@ -226,33 +280,10 @@ def plot(
     if backup is not None:
         output_layers = backup
 
-    new_output_layers = {}
-    for layer, kwargs in tqdm(input_layers.items()):
-        if layer in output_layers:
-            continue
-
-        C.log(f"- fetching layer '{layer}'")
-
-        # Fetch any missing layers to check if any missing.
-        # Define base kwargs
-        if radius:
-            base_kwargs = {
-                "point": query if query_mode == "coordinates" else ox.geocode(query),
-                "radius": radius,
-            }
-        else:
-            base_kwargs = {
-                "perimeter": query
-                if query_mode == "polygon"
-                else get_perimeter(query, by_osmid=query_mode == "osmid")
-            }
-
-        # Fetch layer
-        # code.interact(local=dict(globals(), **locals()))
-        new_output_layers[layer] = get_layer(
-            layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {})
-        )
-        # code.interact(local=dict(globals(), **locals()))
+    # new_output_layers = fetch_parallel(input_layers, output_layers, query, query_mode, radius)
+    new_output_layers = fetch_sequential(
+        input_layers, output_layers, query, query_mode, radius
+    )
 
     # We apply transformation and postprocessing to anything new we fetched before
     # merging with what we had before (if anything).

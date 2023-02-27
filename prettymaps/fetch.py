@@ -35,8 +35,8 @@ from rich.console import Console
 C = Console()
 
 
-# NOTE: Doubling because of timeouts.
-ox.config(timeout=360)
+# NOTE: Quadrupling because of timeouts.
+ox.config(timeout=720)
 
 
 def get_boundary(

@@ -8,3 +8,4 @@ rich
 tqdm
 shutup
 Unidecode
+# p_tqdm  # include if using

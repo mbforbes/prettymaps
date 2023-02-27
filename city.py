@@ -7,6 +7,7 @@ import code
 import glob
 import os
 import pickle
+from typing import Union, Tuple
 
 from imgcat import imgcat
 from matplotlib import pyplot as plt
@@ -20,13 +21,17 @@ from prettymaps import plot
 def get_output_path(dir: str, slug: str, boundary_type: str) -> str:
     n = 1
     while True:
-        g = os.path.join(dir, f"{slug}-{n}*.png")
-        gs = len(glob.glob(g))
-        print(g, gs)
-        if gs == 0:
+        if len(glob.glob(os.path.join(dir, f"{slug}-{n}*.png"))) == 0:
             break
         n += 1
     return os.path.join(dir, f"{slug}-{n}-{boundary_type}.png")
+
+
+def parse_place(place: str) -> Union[str, Tuple[float, float]]:
+    """Returns float tuple if it looks like coords, else just the input."""
+    if place[0] == "(" and place[-1] == ")" and len(place.split(",")) == 2:
+        return tuple(float(x) for x in place[1:-1].split(","))  # type: ignore
+    return place
 
 
 C = Console()
@@ -51,6 +56,11 @@ palettes = {
     "usa": ["#B63841", "#014d99", "#FAF8F8"],
     # Spain: right from the map
     "spain": ["#B63841", "#F6CA6B"],
+    # Greece
+    "greece": ["#195bcc", "#FAF8F8"],
+    # England
+    "england": ["#B63841", "#FAF8F8"],
+    "bosnia": ["#195bcc", "#F6CA6B"],
 }
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -63,19 +73,62 @@ parser.add_argument(
     type=int,
     help="If specified, radius in meters to bound instead of OSM-defined place perimeter.",
 )
+parser.add_argument(
+    "--place-slug",
+    type=str,
+    help="If provided, use this instead auto-generating file name from place.",
+)
+parser.add_argument(
+    "--writing",
+    type=str,
+    help="If provided, write this instead of the place name on the map.",
+)
+parser.add_argument(
+    "--x",
+    type=float,
+    default=1.0,
+    help="Where on x-axis to write place name (right-aligned). 0 left, 1 right.",
+)
+parser.add_argument(
+    "--y",
+    type=float,
+    default=0.0,
+    help="Where on y-axis to write place name (baseline-aligned). 0 bottom, 1 top.",
+)
+parser.add_argument(
+    "--rotation-deg",
+    type=int,
+    default=0,
+    help="Rotate the place text counterclockwise by this",
+)
+
 
 args = parser.parse_args()
 
+# if args.x < 0.0 or args.x > 1.0:
+#     C.log("Need 0 < x < 1")
+#     exit(1)
+# if args.y < 0.0 or args.y > 1.0:
+#     C.log("Need 0 < y < 1")
+#     exit(1)
+
+writing = args.writing
 radius = args.radius
 palette = palettes[args.palette]
-place = args.place
-place_slug = unidecode(
-    place.lower()
-    .replace(" ", "-")
-    .replace(",", "-")
-    .replace(".", "-")
-    .replace("--", "-")
-    .replace("--", "-")
+place = parse_place(args.place)
+# sanity check
+assert isinstance(place, str) or args.place_slug is not None, "Need place slug if coord"
+place_slug = (
+    args.place_slug
+    if args.place_slug is not None
+    else unidecode(
+        place.lower()  # type: ignore
+        .replace(" ", "-")
+        .replace(",", "-")
+        .replace(".", "-")
+        .replace("--", "-")
+        .replace("--", "-")
+    )
 )
 boundary_type = f"r{radius}" if radius is not None else "perimeter"
 cache_path = f"cache/{place_slug}-{boundary_type}.pickle"
@@ -87,15 +140,19 @@ C.log(f"- palette:     {palette}")
 C.log(f"- cache_path:  {cache_path}")
 C.log(f"- output_path: {output_path}")
 
-exit(0)
-
 backup = None
 if os.path.exists(cache_path):
     C.log(f"Cache found, loading {cache_path}")
     with open(cache_path, "rb") as f:
         backup = pickle.load(f)
 
-fig, ax = plt.subplots(figsize=(15, 12), constrained_layout=True)
+# og: 15 x 12, resulting in 1500 x 1200 px
+# v2: 21.12 x 16.90 resulting in 2112 x 1690 px (actually: 1689)
+#     desired bc display width is 704, times pixel scale 3 = 2112
+# v3: 14.08 x 11.27. turns out pixel density on comps/ipads is 2, not 3
+#     (3 on phones, but max width there is like 390 CSSpx = 1170 PHYSpx)
+#     so targeting 704 x 2 = 1408px W
+fig, ax = plt.subplots(figsize=(14.08, 11.27), constrained_layout=True)
 fig.patch.set_facecolor("#FCEEE1")
 
 
@@ -109,6 +166,9 @@ to_delete = [
     # "lines",
     # "parking",
     # "water",
+    # "coastline"
+    # "railway",
+    # "streets"
 ]
 if backup is not None:
     for d in to_delete:
@@ -131,12 +191,13 @@ layers = plot(
                 "tertiary": 3,
                 "residential": 2,
                 "service": 2,
-                "unclassified": 1,
-                "pedestrian": 1,
-                "footway": 1,
-                "path": 1,
+                "unclassified": 2,
+                "pedestrian": 2,
+                "footway": 2,
+                "path": 2,
             }
         },
+        # "lines" are not working anymore and I don't know why.
         "lines": {
             "tags": {
                 "railway": True,
@@ -144,6 +205,7 @@ layers = plot(
                 "aeroway": ["runway", "taxiway"],
             }
         },
+        # "railway": {},
         "building": {
             "tags": {
                 "building": True,
@@ -164,6 +226,7 @@ layers = plot(
                 "marina": True,
                 "bay": True,
                 "river": True,
+                "natural": "water",
             },
             # "union": False,
             # "buffer": 1000,  # meters. affects # retrieved.
@@ -186,7 +249,7 @@ layers = plot(
                     "cemetery",
                 ],
                 "natural": ["island", "scrub", "wood"],
-                "leisure": ["park", "golf_course"],
+                "leisure": ["park", "golf_course", "nature_reserve"],
             }
         },
         "parking": {
@@ -205,6 +268,11 @@ layers = plot(
                 "amenity": ["social_facility"],
             }
         },
+        # "coastline": {
+        #     "file_location": "coast/water-polygons-split-4326/water_polygons.shp",
+        #     "buffer": 100000,
+        #     "circle": True,
+        # },
     },
     drawing_kwargs={
         # I think that "fc" = face color (fill)
@@ -227,10 +295,13 @@ layers = plot(
         "garden": {"fc": "#a9d1a9", "ec": "#a9d1a9", "lw": 0.25, "zorder": 2},
         "green": {"fc": "#a9d1a9", "ec": "#a9d1a9", "lw": 0.25, "zorder": 2},
         "water": {"fc": "#92D5F2", "ec": "#92D5F2", "lw": 0.25, "zorder": 3},
-        # "coastline": {"fc": "#ff0000", "ec": "#ff0000", "lw": 0.25, "zorder": 3},
+        "coastline": {"fc": "#92D5F2", "ec": "#92D5F2", "lw": 0.25, "zorder": 3},
         "parking": {"fc": "#B9B2AB", "ec": "#B9B2AB", "lw": 0.25, "zorder": 4},
         "streets": {"fc": "#2F3737BB", "ec": "#2F373788", "lw": 0.25, "zorder": 5},
+        # "railway": {"fc": "#2F3737BB", "ec": "#2F373788", "lw": 0.25, "zorder": 5},
+        # "railway": {"fc": "#FF00AA", "ec": "#FF00AA", "lw": 1, "zorder": 5},
         "lines": {"fc": "#2F3737BB", "ec": "#2F373788", "lw": 0.25, "zorder": 5},
+        # "lines": {"fc": "#FF00AA", "ec": "#FF00AA", "lw": 1, "zorder": 5},
         "building": {"palette": palette, "ec": "#2F3737", "lw": 0, "zorder": 6},
     },
     # osm_credit={"x": -0.55, "y": -0.25, "color": "#2F3737"} if i == 0 else None,
@@ -246,15 +317,17 @@ with open(cache_path, "wb") as f:
 xmin, ymin, xmax, ymax = layers["perimeter"].bounds
 dx, dy = xmax - xmin, ymax - ymin
 ax.text(
-    # xmin + 0.75 * dx,
-    # ymin + 0.05 * dy,
-    xmax,
-    ymin,
-    place,
+    xmin + args.x * dx,
+    ymin + args.y * dy,
+    # xmax,
+    # ymin,
+    (place if writing is None else writing),
     color="#2F3737",
-    # rotation=90,
+    rotation=args.rotation_deg,
     fontproperties=fm.FontProperties(
-        fname="assets/Permanent_Marker/PermanentMarker-Regular.ttf", size=35
+        # NOTE: update w/ size changes. used 42 for v2 size.
+        fname="assets/Permanent_Marker/PermanentMarker-Regular.ttf",
+        size=28,
     ),
     ha="right",
     va="baseline",
