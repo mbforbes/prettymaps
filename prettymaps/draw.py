@@ -17,6 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 import code
+import copy
+import hashlib
+import json
+import os
+import pickle
 import re
 from collections.abc import Iterable
 
@@ -25,6 +30,7 @@ import pandas as pd
 from geopandas import GeoDataFrame
 import numpy as np
 from numpy.random import choice
+from shapely.errors import TopologicalError
 from shapely.geometry import box, Polygon, MultiLineString, GeometryCollection
 from shapely.affinity import translate, scale, rotate
 from descartes import PolygonPatch
@@ -37,6 +43,7 @@ from tqdm import tqdm
 from .fetch import get_perimeter, get_layer
 
 C = Console()
+LAYER_CACHE_DIR = "cache/layers/"
 
 # Plot a single shape
 def plot_shape(shape, ax, vsketch=None, **kwargs):
@@ -126,8 +133,29 @@ def draw_text(ax, text, x, y, **kwargs):
 
 
 def fetch_layer(query, query_mode, radius, layer, kwargs):
-    C.log(f"- fetching layer '{layer}'")
+    # C.log(f"- want layer '{layer}'")
 
+    # get from cache if can
+    os.makedirs(LAYER_CACHE_DIR, exist_ok=True)
+    key = {
+        "query": query,
+        "query_mode": query_mode,
+        "radius": radius,
+        "layer": layer,
+        "kwargs": copy.deepcopy(kwargs),
+    }
+    key_str = json.dumps(key, sort_keys=True)
+    key_hash = hashlib.md5(key_str.encode("utf-8")).hexdigest()
+    cache_path = os.path.join(LAYER_CACHE_DIR, key_hash + ".pickle")
+    if os.path.isfile(cache_path):
+        C.log(f"- Cache found for layer '{layer}'")
+        with open(cache_path, "rb") as fr:
+            obj = pickle.load(fr)
+        if obj["key_str"] == key_str:
+            # C.log(f"- returning cache of layer '{layer}'")
+            return obj["layer"]
+
+    C.log(f"- Fetching layer '{layer}'")
     # Define base kwargs
     if radius:
         base_kwargs = {
@@ -141,8 +169,23 @@ def fetch_layer(query, query_mode, radius, layer, kwargs):
             else get_perimeter(query, by_osmid=query_mode == "osmid")
         }
 
-    # Fetch layer
-    return get_layer(layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {}))
+    # Fetch layer.
+    # We account for certain failures and just continue, but don't write to cache (for
+    # now).
+    layer_res = get_layer(
+        layer, **base_kwargs, **(kwargs if type(kwargs) == dict else {})
+    )
+    # write to cache
+    C.log(f"- writing layer '{layer}' to cache at '{cache_path}'")
+    with open(cache_path, "wb") as fw:
+        pickle.dump(
+            {
+                "key_str": key_str,
+                "layer": layer_res,
+            },
+            fw,
+        )
+    return layer_res
 
 
 def fetch_parallel(input_layers, output_layers, query, query_mode, radius):
@@ -176,7 +219,14 @@ def fetch_sequential(input_layers, output_layers, query, query_mode, radius):
     for layer, kwargs in tqdm(input_layers.items()):
         if layer in output_layers:
             continue
-        new_output_layers[layer] = fetch_layer(query, query_mode, radius, layer, kwargs)
+        try:
+            new_output_layers[layer] = fetch_layer(
+                query, query_mode, radius, layer, kwargs
+            )
+        except TopologicalError:
+            C.log(f"Got exception trying to fetch layer '{layer}'")
+            C.print_exception()
+            C.log("Going to continue without it...")
 
     return new_output_layers
 

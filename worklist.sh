@@ -35,4 +35,22 @@
 
 # georgia
 # python city.py --place "Tbilisi, Georgia" --palette "england"
-python city.py --place "Stepantsminda, Georgia" --palette "england" --radius 1000
+# python city.py --place "Stepantsminda, Georgia" --palette "england" --radius 1000
+
+# korea
+# python city.py --place "Seoul, Korea" --palette "usa"
+# python city.py --place "Busan, Korea" --palette "usa"
+# python city.py --place "Jeju, Korea" --palette "usa"
+# python city.py --place "Busan, Korea" --palette "usa" --radius 7500
+# python city.py --place "Busan, Korea" --palette "usa" --radius 10000
+# python city.py --place "Busan, Korea" --palette "usa" --radius 12500
+# python city.py --place "Busan, Korea" --palette "usa" --radius 15000
+# python city.py --place "Busan, Korea" --palette "usa" --radius 17500
+# python city.py --place "Busan, Korea" --palette "usa" --radius 20000
+# python city.py --place "Jeju, Korea" --palette "usa" --radius 5000
+# python city.py --place "Jeju, Korea" --palette "usa" --radius 10000
+# python city.py --place "Jeju, Korea" --palette "usa" --radius 15000
+# python city.py --place "Jeju City, Korea" --palette "usa" --radius 5000
+# python city.py --place "Jeju City, Korea" --palette "usa" --radius 10000
+# python city.py --place "Jeju City, Korea" --palette "usa" --radius 15000
+python city.py --place "(35.137196, 129.060149)" --palette "usa" --radius 12500 --writing "Busan, Korea" --draw-layers
