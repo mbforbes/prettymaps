@@ -88,12 +88,14 @@ PALETTES = {
     "england": ["#B63841", "#FAF8F8"],
     "bosnia": ["#195bcc", "#F6CA6B"],
     # "korea": ["#B63841", "#195bcc"],  # just using usa colors for now
+    "philippines": ["#B63841", "#FAF8F8", "#195bcc", "#F6CA6B"],
 }
 
 
 def do_plot(
     place: Place,
     radius: int | None,
+    # bounds: List[float] | None,
     palette: List[str],
     backup: Any,
     writing_txt,
@@ -104,15 +106,23 @@ def do_plot(
     output_path: str,
 ):
     """Returns layers"""
-    # og: 15 x 12, resulting in 1500 x 1200 px
-    # v2: 21.12 x 16.90 resulting in 2112 x 1690 px (actually: 1689)
-    #     desired bc display width is 704, times pixel scale 3 = 2112
-    # v3: 14.08 x 11.27. turns out pixel density on comps/ipads is 2, not 3
-    #     (3 on phones, but max width there is like 390 CSSpx = 1170 PHYSpx)
-    #     so targeting 704 x 2 = 1408px W
+    # og:   15 x 12, resulting in 1500 x 1200 px
+    # v2:   21.12 x 16.90 resulting in 2112 x 1690 px (actually: 1689)
+    #       desired bc display width is 704, times pixel scale 3 = 2112
+    # v3:   14.08 x 11.27. turns out pixel density on comps/ipads is 2, not 3
+    #       (3 on phones, but max width there is like 390 CSSpx = 1170 PHYSpx)
+    #       so targeting 704 x 2 = 1408px W
+    # v3x4: scaled version when needing to blow stuff up
+    # v4:   matching other maps (450px²), x2 px density = 900px² = 9.00
+    # v5:   20 x 20. slightly larger standalone: 1000 x 2 = 2000px sq
     plt.clf()
-    fig, ax = plt.subplots(figsize=(14.08, 11.27), constrained_layout=True)
-    fig.patch.set_facecolor("#FCEEE1")
+    # fig, ax = plt.subplots(figsize=(14.08, 11.27), constrained_layout=True)
+    # fig, ax = plt.subplots(figsize=(14.08 * 4, 11.27 * 4), constrained_layout=True)
+    # fig, ax = plt.subplots(figsize=(9.00, 9.00), constrained_layout=True)
+    # fig, ax = plt.subplots(figsize=(15.00, 15.00), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(20.00, 20.00), constrained_layout=True)
+    fig.patch.set_facecolor("#FCEEE1")  # orig
+    # fig.patch.set_facecolor("#FCEEE100")  # transparent
 
     layers = plot(
         place,
@@ -263,9 +273,14 @@ def do_plot(
         # osm_credit={"x": -0.55, "y": -0.25, "color": "#2F3737"} if i == 0 else None,
         # NOTE: Putting OSM and prettymaps credit in image captions/attributions.
         osm_credit=None,
+        # custom_bounds=bounds,
     )
 
     xmin, ymin, xmax, ymax = layers["perimeter"].bounds
+    # C.log(f"Perimeter bounds: {xmin, ymin, xmax, ymax}")
+    # if bounds is not None:
+    #     xmin, ymin, xmax, ymax = bounds
+    #     C.log(f"Overwrote to custom bounds: {xmin, ymin, xmax, ymax}")
     dx, dy = xmax - xmin, ymax - ymin
     ax.text(
         xmin + writing_x * dx,
@@ -273,22 +288,26 @@ def do_plot(
         # xmax,
         # ymin,
         (place if writing_txt is None else writing_txt),
-        color="#2F3737",
+        color="#2F3737",  # used for a while
+        # color="#808080",  # trying to be ok for dark and light schemes
         rotation=writing_rot,
         fontproperties=fm.FontProperties(
             # NOTE: update w/ size changes. used 42 for v2 size.
             fname="assets/Permanent_Marker/PermanentMarker-Regular.ttf",
-            size=28,
+            size=48,
         ),
         ha="right",
         va="baseline",
     )
 
     ax.autoscale()
+    # ax.set_xlim(xmin, xmax)
+    # ax.set_ylim(ymin, ymax)
 
     # imgcat(fig)
     C.log(f"Saving image to {output_path}")
     plt.savefig(output_path)
+    # plt.show()
 
     return layers
 
@@ -345,6 +364,11 @@ def main() -> None:
         action="store_true",
         help="Whether to draw individual layers in a folder.",
     )
+    # parser.add_argument(
+    #     "--bounds",
+    #     type=str,
+    #     help="fmt: 'lat1, lon2, lat2, lon2'. If provided, draw to this instead of auto bounds (perimeter or radius).",
+    # )
 
     args = parser.parse_args()
 
@@ -372,6 +396,9 @@ def main() -> None:
             .replace("--", "-")
         )
     )
+    # bounds: None | List[float] = None
+    # if args.bounds is not None:
+    #     bounds = [float(x.strip()) for x in args.bounds.split(",")]
     boundary_type = f"r{radius}" if radius is not None else "perimeter"
     cache_path = f"cache/{place_slug}-{boundary_type}.pickle"
     output_file_path, output_folder_path = get_output_paths(
@@ -418,6 +445,7 @@ def main() -> None:
     layers = do_plot(
         place,
         radius,
+        # bounds,
         palette,
         backup,
         writing_txt,
@@ -448,11 +476,14 @@ def main() -> None:
         ]
         for idx, layer_names in enumerate(layer_sets):
             active_layers += layer_names
-            layer_file_path = os.path.join(output_folder_path, f"{idx}.png")
+            layer_file_path = os.path.join(
+                output_folder_path, f"{place_slug}-{idx}-combined.png"
+            )
             C.log(f"Drawing layer {idx} to {layer_file_path}")
             do_plot(
                 place,
                 radius,
+                # bounds,
                 palette,
                 layers,
                 writing_txt,

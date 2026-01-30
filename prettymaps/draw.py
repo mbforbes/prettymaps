@@ -259,6 +259,7 @@ def plot(
     scale_x=None,
     scale_y=None,
     rotation=None,
+    # custom_bounds=None,
 ):
     """
 
@@ -298,6 +299,8 @@ def plot(
         (Optional) Vertical scale factor
     rotation: float
         (Optional) Rotation in angles (0-360)
+    custom_bounds: List[float] | None
+        (Optional) xmin,ymin,xmax,ymax to use rather than perimeter
 
     Returns
     -------
@@ -366,6 +369,7 @@ def plot(
 
     # Plot background
     if "background" in drawing_kwargs:
+        # NOTE: didn't adjust this w/ custom bounds
         geom = scale(box(*output_layers["perimeter"].bounds), 1.2, 1.2)
 
         if vsketch is None:
@@ -375,6 +379,10 @@ def plot(
 
     # Adjust bounds
     xmin, ymin, xmax, ymax = output_layers["perimeter"].buffer(max_dilation).bounds
+    C.log(f"Original plot bounds: {xmin, ymin, xmax, ymax}")
+    # if custom_bounds is not None:
+    #     xmin, ymin, xmax, ymax = custom_bounds
+    #     C.log(f"Overwrote to plot custom bounds: {xmin, ymin, xmax, ymax}")
     dx, dy = xmax - xmin, ymax - ymin
     if vsketch is None:
         ax.set_xlim(xmin, xmax)
